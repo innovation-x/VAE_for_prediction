@@ -18,9 +18,11 @@ class VAEs(nn.Module):
         # decoder
         self.decoder = Decoder(args.h_dim, args.downsample)
 
-        self.pre_conv = SamePadConv3d(args.h_dim, args.z_dim, 1)
-        self.post_conv = SamePadConv3d(args.z_dim, args.h_dim, 1)
-
+        # self.pre_conv = SamePadConv3d(args.h_dim, args.z_dim, 1)
+        # self.post_conv = SamePadConv3d(args.z_dim, args.h_dim, 1)
+        self.fc_mu = nn.Linear(args.h_dim * args.Linear_multi, args.z_dim)
+        self.fc_var = nn.Linear(args.h_dim * args.Linear_multi, args.z_dim)
+        self.dec_input = nn.Linear(args.z_dim, args.h_dim * args.Linear_multi)
 
     def latent_shape(self):
         input_shape = (self.args.sequence_length, self.args.resolution,
@@ -29,21 +31,25 @@ class VAEs(nn.Module):
                                              self.args.downsample)])
     def encode(self, x):
         # q_phi(z|x)
-        mu, sigma = self.pre_conv(self.encoder(x)), self.pre_conv(self.encoder(x))
+        h = self.encoder(x)
+        h = torch.flatten(h, start_dim=1)
+        mu, sigma = self.fc_mu(h), self.fc_var(h)
+        # mu, sigma = self.fc_mu(self.encoder(x)), self.fc_var(self.encoder(x))
         return mu, sigma
 
     def decode(self, z):
         #p_zeta(x|z)
-        h = self.post_conv(z)
-        h = self.decoder(h)
-        return torch.relu(h)
+        h = self.dec_input(z)
+        h = h.view(-1, 512, 2, 8, 8)
+        x = self.decoder(h)
+        return x
 
     def forward(self, x):
         mu, sigma = self.encode(x)
         epsilon = torch.randn_like(sigma)
         z_reparametrized = mu + sigma * epsilon
         # print(z_reparametrized.shape)
-        x_reconstructed = self.decoder(self.post_conv(z_reparametrized))
+        x_reconstructed = self.decode(z_reparametrized)
         # print(x.shape, x_reconstructed.shape)
         return x_reconstructed, mu, sigma
 
@@ -51,10 +57,10 @@ class VAEs(nn.Module):
     def add_model_specific_args(parent_parser):
         parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False)
         parser.add_argument('--input_channels', type=int, default=3)
-        parser.add_argument('--h_dim', type=int, default=240)
-        parser.add_argument('--n_res_layers', type=int, default=4)
-        parser.add_argument('--z_dim', type=int, default=20)
-        parser.add_argument('--downsample', nargs='+', type=int, default=(4, 4, 4))
+        parser.add_argument('--h_dim', type=int, default=512)
+        parser.add_argument('--Linear_multi', type=int, default=128)
+        parser.add_argument('--z_dim', type=int, default=128)
+        parser.add_argument('--downsample', nargs='+', type=int, default=(8, 8, 8))
         return parser
 
 class Encoder(nn.Module):
@@ -100,8 +106,6 @@ class Decoder(nn.Module):
             n_times_upsample -= 1
 
     def forward(self, x):
-        # h = self.res_stack(x)
-        # h = self.pre_convt(x)
         h = self.batchnorm(x)
         for i, convt in enumerate(self.convts):
             h = convt(h)

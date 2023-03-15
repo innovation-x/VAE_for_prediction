@@ -25,8 +25,8 @@ def main():
     parser.add_argument('--resolution', type=int, default=64)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--num_workers', type=int, default=4)
-    parser.add_argument('--LR_RATE', type=int, default=1e-5)
-    parser.add_argument('--NUM_EPOCHS', type=int, default=10)
+    parser.add_argument('--LR_RATE', type=int, default=0.005)
+    parser.add_argument('--NUM_EPOCHS', type=int, default=3)
     args = parser.parse_args()
     # Load the Dataset
     Dataset = VideoDataset
@@ -78,7 +78,7 @@ def main():
             # compute loss
             recon_loss = F.mse_loss(x_reconstructed, x)/ 0.006
             # recon_loss = - torch.mean(torch.sum(x * torch_log(x_reconstructed) + (1-x) * torch_log(1 - x_reconstructed), dim=1))
-            kl_div = - 0.5 * torch.mean(torch.sum(1 + torch_log(sigma**2) - mu**2 - sigma**2, dim=1))
+            kl_div = torch.mean(-0.5 * torch.sum(1 + torch_log(sigma**2) - mu**2 - sigma**2, dim=1), dim=0)
             loss = recon_loss + kl_div
 
             loss.backward()
