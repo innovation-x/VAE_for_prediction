@@ -4,7 +4,7 @@ import os.path
 import torch
 import numpy as np
 from torch import nn,optim
-from videovae import VAEs, VideoData, VideoDataset
+from videovae import VAEs, VideoDataset
 import torch.distributed as dist
 import torch.nn.functional as F
 import torch.utils.data as data
@@ -25,8 +25,8 @@ def main():
     parser.add_argument('--resolution', type=int, default=64)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--num_workers', type=int, default=4)
-    parser.add_argument('--LR_RATE', type=int, default=0.005)
-    parser.add_argument('--NUM_EPOCHS', type=int, default=3)
+    parser.add_argument('--LR_RATE', type=int, default=1e-6)
+    parser.add_argument('--NUM_EPOCHS', type=int, default=10)
     args = parser.parse_args()
     # Load the Dataset
     Dataset = VideoDataset
@@ -74,20 +74,19 @@ def main():
             loop.set_description(f"Epoch {epoch}")
             x,_ = dict.values(x)
             x = x.to(DEVICE)
-            x_reconstructed, mu, sigma = model.forward(x)
+            x_reconstructed, mu, log_sigma = model.forward(x)
             # compute loss
-            recon_loss = F.mse_loss(x_reconstructed, x)/ 0.006
+            recon_loss = F.mse_loss(x_reconstructed, x, size_average=False)
             # recon_loss = - torch.mean(torch.sum(x * torch_log(x_reconstructed) + (1-x) * torch_log(1 - x_reconstructed), dim=1))
-            kl_div = torch.mean(-0.5 * torch.sum(1 + torch_log(sigma**2) - mu**2 - sigma**2, dim=1), dim=0)
+            kl_div = torch.mean(- 0.5 * torch.sum(1 + 2 * log_sigma - mu.pow(2) - (2 * log_sigma).exp()))
             loss = recon_loss + kl_div
-
             loss.backward()
             optimizer.step()
             losses.append(loss.cpu().detach().numpy())
             KL_losses.append(kl_div.cpu().detach().numpy())
             recon_losses.append(recon_loss.cpu().detach().numpy())
             loop.set_postfix(loss=loss.item(), KL_loss=kl_div.item(), Recon_loss=recon_loss.item() )
-            # print(loss.item())
+
 
         # losses_val = []
         # model.eval()

@@ -15,14 +15,20 @@ class VAEs(nn.Module):
         #encoder
         self.encoder = Encoder(args.h_dim, args.downsample)
 
+        self.fc_mu_1 = nn.Linear(args.h_dim * args.Linear_multi, args.h_dim)
+        self.fc_mu_2 = nn.Linear(args.h_dim, args.z_dim)
+        self.fc_var_1 = nn.Linear(args.h_dim * args.Linear_multi, args.h_dim)
+        self.fc_var_2 = nn.Linear(args.h_dim, args.z_dim)
+
         # decoder
         self.decoder = Decoder(args.h_dim, args.downsample)
 
-        # self.pre_conv = SamePadConv3d(args.h_dim, args.z_dim, 1)
+        self.dec_1 = nn.Linear(args.z_dim, args.h_dim)
+        self.dec_2 = nn.Linear(args.h_dim, args.h_dim * args.Linear_multi)
+
+        # self.pre_conv_mu = SamePadConv3d(args.h_dim, args.z_dim, 1)
+        # self.pre_conv_sigma = SamePadConv3d(args.h_dim, args.z_dim, 1)
         # self.post_conv = SamePadConv3d(args.z_dim, args.h_dim, 1)
-        self.fc_mu = nn.Linear(args.h_dim * args.Linear_multi, args.z_dim)
-        self.fc_var = nn.Linear(args.h_dim * args.Linear_multi, args.z_dim)
-        self.dec_input = nn.Linear(args.z_dim, args.h_dim * args.Linear_multi)
 
     def latent_shape(self):
         input_shape = (self.args.sequence_length, self.args.resolution,
@@ -33,25 +39,29 @@ class VAEs(nn.Module):
         # q_phi(z|x)
         h = self.encoder(x)
         h = torch.flatten(h, start_dim=1)
-        mu, sigma = self.fc_mu(h), self.fc_var(h)
-        # mu, sigma = self.fc_mu(self.encoder(x)), self.fc_var(self.encoder(x))
-        return mu, sigma
+        # (16, 512 * 2 * 8 * 8)
+        mu, log_sigma = self.fc_mu_2(self.fc_mu_1(h)), self.fc_var_2(self.fc_var_1(h))
+        # flatten -->mu without sigma
+        # mu, log_sigma = self.pre_conv(self.encoder(x)), self.pre_conv(self.encoder(x))
+        return mu, log_sigma
 
     def decode(self, z):
         #p_zeta(x|z)
-        h = self.dec_input(z)
+        h = self.dec_2(self.dec_1(z))
         h = h.view(-1, 512, 2, 8, 8)
         x = self.decoder(h)
+        # x = self.decoder(self.post_conv(z))
         return x
 
     def forward(self, x):
-        mu, sigma = self.encode(x)
+        mu, log_sigma = self.encode(x)
+        sigma = log_sigma.exp()
         epsilon = torch.randn_like(sigma)
         z_reparametrized = mu + sigma * epsilon
         # print(z_reparametrized.shape)
         x_reconstructed = self.decode(z_reparametrized)
         # print(x.shape, x_reconstructed.shape)
-        return x_reconstructed, mu, sigma
+        return x_reconstructed, mu, log_sigma
 
     @staticmethod
     def add_model_specific_args(parent_parser):
@@ -66,7 +76,6 @@ class VAEs(nn.Module):
 class Encoder(nn.Module):
     def __init__(self, n_hiddens, downsample):
         super().__init__()
-
         n_times_downsample = np.array([int(math.log2(d)) for d in downsample])
         self.convs = nn.ModuleList()
         max_ds = n_times_downsample.max()
@@ -85,9 +94,7 @@ class Encoder(nn.Module):
             h = F.relu(conv(h))
         h = self.conv_last(h)
         h = self.batchnorm(h)
-        # h = self.res_stack(h)
         return h
-
 
 class Decoder(nn.Module):
     def __init__(self, n_hiddens, upsample):
@@ -96,7 +103,6 @@ class Decoder(nn.Module):
         n_times_upsample = np.array([int(math.log2(d)) for d in upsample])
         max_us = n_times_upsample.max()
         self.convts = nn.ModuleList()
-        self.pre_convt = SamePadConvTranspose3d(n_hiddens, n_hiddens, kernel_size=3)
         for i in range(max_us):
             out_channels = 3 if i == max_us - 1 else n_hiddens
             us = tuple([2 if d > 0 else 1 for d in n_times_upsample])
