@@ -42,8 +42,9 @@ class VAEs(nn.Module):
         mu, sigma = self.encode(x)
         epsilon = torch.randn_like(sigma)
         z_reparametrized = mu + sigma * epsilon
-        x_reconstructed = torch.relu(self.decoder(self.post_conv(z_reparametrized)))
-        # print(x.size(), x_reconstructed.size())
+        # print(z_reparametrized.shape)
+        x_reconstructed = self.decoder(self.post_conv(z_reparametrized))
+        # print(x.shape, x_reconstructed.shape)
         return x_reconstructed, mu, sigma
 
     @staticmethod
@@ -52,13 +53,14 @@ class VAEs(nn.Module):
         parser.add_argument('--input_channels', type=int, default=3)
         parser.add_argument('--h_dim', type=int, default=240)
         parser.add_argument('--n_res_layers', type=int, default=4)
-        parser.add_argument('--z_dim', type=int, default=50)
+        parser.add_argument('--z_dim', type=int, default=20)
         parser.add_argument('--downsample', nargs='+', type=int, default=(4, 4, 4))
         return parser
 
 class Encoder(nn.Module):
     def __init__(self, n_hiddens, downsample):
         super().__init__()
+
         n_times_downsample = np.array([int(math.log2(d)) for d in downsample])
         self.convs = nn.ModuleList()
         max_ds = n_times_downsample.max()
@@ -70,11 +72,13 @@ class Encoder(nn.Module):
             n_times_downsample -= 1
         self.conv_last = SamePadConv3d(in_channels, n_hiddens, kernel_size=3)
 
+        self.batchnorm = nn.BatchNorm3d(n_hiddens)
     def forward(self, x):
         h = x
         for conv in self.convs:
             h = F.relu(conv(h))
         h = self.conv_last(h)
+        h = self.batchnorm(h)
         # h = self.res_stack(h)
         return h
 
@@ -82,7 +86,7 @@ class Encoder(nn.Module):
 class Decoder(nn.Module):
     def __init__(self, n_hiddens, upsample):
         super().__init__()
-
+        self.batchnorm = nn.BatchNorm3d(n_hiddens)
         n_times_upsample = np.array([int(math.log2(d)) for d in upsample])
         max_us = n_times_upsample.max()
         self.convts = nn.ModuleList()
@@ -98,7 +102,7 @@ class Decoder(nn.Module):
     def forward(self, x):
         # h = self.res_stack(x)
         # h = self.pre_convt(x)
-        h = x
+        h = self.batchnorm(x)
         for i, convt in enumerate(self.convts):
             h = convt(h)
             if i < len(self.convts) - 1:

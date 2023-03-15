@@ -82,6 +82,7 @@ def preprocess(video, resolution, sequence_length=None):
     video = video.permute(0, 3, 1, 2).float() / 255. # TCHW
     t, c, h, w = video.shape
 
+
     # temporal crop
     if sequence_length is not None:
         assert sequence_length <= t
